@@ -1,13 +1,10 @@
 .include "constants.s"
 
-//mensajes que imprime el programa
 .section .data
     msg_txt: .asciz "Ingrese el texto a cifrar (maximo 16 caracteres): "
         lenMsgTxt = . - msg_txt
-    msg_key: .asciz "Ingrese la clave (32 caracteres hex): "
+    msg_key: .asciz "Ingrese la clave (16 caracteres): "
         lenMsgKey = . - msg_key
-    key_err_msg: .asciz "Error: Valor de clave incorrecto\n"
-        lenKeyErr = . - key_err_msg
     newline: .asciz "\n"
     debug_state: .asciz "Matriz de Estado:\n"
         lenDebugState = . - debug_state
@@ -38,12 +35,9 @@
         lenMsgRound = . - msg_round
     msg_round_end: .asciz " ===\n"
         lenMsgRoundEnd = . - msg_round_end
-    msg_final_cipher: .asciz "\n=== CRIPTOGRAMA FINAL ===\n"
-        lenMsgFinalCipher = . - msg_final_cipher
-    msg_cipher_hex: .asciz "Hexadecimal: "
-        lenMsgCipherHex = . - msg_cipher_hex
+    msg_final: .asciz "\n=== CRIPTOGRAMA FINAL ===\n"
+        lenMsgFinal = . - msg_final
 
-//reserva de memoria para variables globales
 .section .bss
     .global matState
     matState: .space 16, 0
@@ -74,7 +68,7 @@
 .endm
 
 .section .text
-// LEER EL TEXTO A CIFRAR Y ORDENAR EN COLUMN-MAJOR
+
 .type readTextInput, %function
 .global readTextInput
 readTextInput:
@@ -86,120 +80,81 @@ readTextInput:
     mov x3, #0
 convert_text_loop:
     cmp x3, #16
-    b.ge pad_remaining_bytes
+    b.ge convert_text_done
     ldrb w4, [x1, x3]
     cmp w4, #10
-    b.eq pad_remaining_bytes
+    b.eq pad_remaining_text
     cmp w4, #0
-    b.eq pad_remaining_bytes
+    b.eq pad_remaining_text
     mov x7, #4
     udiv x8, x3, x7
     msub x9, x8, x7, x3
-    mul x10, x9, x7
-    add x10, x10, x8
+    mul x10, x8, x7
+    add x10, x10, x9
     strb w4, [x2, x10]
     add x3, x3, #1
     b convert_text_loop
-pad_remaining_bytes:
+pad_remaining_text:
     cmp x3, #16
     b.ge convert_text_done
     mov x7, #4
     udiv x8, x3, x7
     msub x9, x8, x7, x3
-    mul x10, x9, x7
-    add x10, x10, x8
+    mul x10, x8, x7
+    add x10, x10, x9
     mov w4, #0
     strb w4, [x2, x10]
     add x3, x3, #1
-    b pad_remaining_bytes
+    b pad_remaining_text
 convert_text_done:
     ldp x29, x30, [sp], #16
     ret
     .size readTextInput, (. - readTextInput)
 
-.type convertHexKey, %function
-.global convertHexKey
-//LEER LA CLAVE INGRESADA Y PROCESAR HEXADECIMAL
-convertHexKey:
+.type readKeyInput, %function
+.global readKeyInput
+readKeyInput:
     stp x29, x30, [sp, #-16]!
     mov x29, sp
-    read 0, buffer, 33
+    read 0, buffer, 256
     ldr x1, =buffer
     ldr x2, =key
     mov x3, #0
-    mov x11, #0
-convert_hex_loop:
+convert_key_loop:
     cmp x3, #16
-    b.ge convert_hex_done
-skip_non_hex:
-    ldrb w4, [x1, x11]
-    cmp w4, #0
-    b.eq convert_hex_done
+    b.ge convert_key_done
+    ldrb w4, [x1, x3]
     cmp w4, #10
-    b.eq convert_hex_done
-    bl is_hex_char
-    cmp w0, #1
-    b.eq process_hex_pair
-    add x11, x11, #1
-    b skip_non_hex
-process_hex_pair:
-    ldrb w4, [x1, x11]
-    add x11, x11, #1
-    bl hex_char_to_nibble
-    lsl w5, w0, #4
-    ldrb w4, [x1, x11]
-    add x11, x11, #1
-    bl hex_char_to_nibble
-    orr w5, w5, w0
-    strb w5, [x2, x3]
+    b.eq pad_remaining_key
+    cmp w4, #0
+    b.eq pad_remaining_key
+    mov x7, #4
+    udiv x8, x3, x7
+    msub x9, x8, x7, x3
+    mul x10, x8, x7
+    add x10, x10, x9
+    strb w4, [x2, x10]
     add x3, x3, #1
-    b convert_hex_loop
-convert_hex_done:
+    b convert_key_loop
+pad_remaining_key:
+    cmp x3, #16
+    b.ge convert_key_done
+    mov x7, #4
+    udiv x8, x3, x7
+    msub x9, x8, x7, x3
+    mul x10, x8, x7
+    add x10, x10, x9
+    mov w4, #0
+    strb w4, [x2, x10]
+    add x3, x3, #1
+    b pad_remaining_key
+convert_key_done:
     ldp x29, x30, [sp], #16
     ret
-    .size convertHexKey, (. - convertHexKey)
-
-is_hex_char:
-    cmp w4, #'0'
-    b.lt not_hex
-    cmp w4, #'9'
-    b.le is_hex
-    orr w4, w4, #0x20
-    cmp w4, #'a'
-    b.lt not_hex
-    cmp w4, #'f'
-    b.le is_hex
-not_hex:
-    mov w0, #0
-    ret
-is_hex:
-    mov w0, #1
-    ret
-
-hex_char_to_nibble:
-    cmp w4, #'0'
-    b.lt hex_error
-    cmp w4, #'9'
-    b.le hex_digit
-    orr w4, w4, #0x20
-    cmp w4, #'a'
-    b.lt hex_error
-    cmp w4, #'f'
-    b.gt hex_error
-    sub w0, w4, #'a'
-    add w0, w0, #10
-    ret
-hex_digit:
-    sub w0, w4, #'0'
-    ret
-hex_error:
-    print 1, key_err_msg, lenKeyErr
-    mov w0, #0
-    ret
+    .size readKeyInput, (. - readKeyInput)
 
 .type printMatrix, %function
 .global printMatrix
-//MOSTRAR MATRICES EN CONSOLA
 printMatrix:
     stp x29, x30, [sp, #-48]!
     mov x29, sp
@@ -220,8 +175,8 @@ print_col_loop:
     cmp x24, #4
     b.ge print_row_newline
     mov x25, #4
-    mul x25, x23, x25
-    add x25, x25, x24
+    mul x25, x24, x25
+    add x25, x25, x23
     ldr x20, [sp, #16]
     ldrb w0, [x20, x25]
     bl print_hex_byte
@@ -273,7 +228,6 @@ low_done:
 
 .type subBytes, %function
 .global subBytes
-//FUNCION SUBBYTES
 subBytes:
     stp x29, x30, [sp, #-32]!
     mov x29, sp
@@ -308,30 +262,30 @@ shiftRows:
     str x21, [sp, #32]
     str x22, [sp, #40]
     ldr x19, =matState
-    ldrb w20, [x19, #4]
+    ldrb w20, [x19, #1]
     ldrb w21, [x19, #5]
-    strb w21, [x19, #4]
-    ldrb w21, [x19, #6]
-    strb w21, [x19, #5]
-    ldrb w21, [x19, #7]
-    strb w21, [x19, #6]
-    strb w20, [x19, #7]
-    ldrb w20, [x19, #8]
+    strb w21, [x19, #1]
     ldrb w21, [x19, #9]
-    ldrb w22, [x19, #10]
-    strb w22, [x19, #8]
-    ldrb w22, [x19, #11]
-    strb w22, [x19, #9]
-    strb w20, [x19, #10]
-    strb w21, [x19, #11]
-    ldrb w20, [x19, #12]
-    ldrb w21, [x19, #15]
-    strb w21, [x19, #12]
-    ldrb w21, [x19, #14]
-    strb w21, [x19, #15]
+    strb w21, [x19, #5]
     ldrb w21, [x19, #13]
-    strb w21, [x19, #14]
+    strb w21, [x19, #9]
     strb w20, [x19, #13]
+    ldrb w20, [x19, #2]
+    ldrb w21, [x19, #6]
+    ldrb w22, [x19, #10]
+    strb w22, [x19, #2]
+    ldrb w22, [x19, #14]
+    strb w22, [x19, #6]
+    strb w20, [x19, #10]
+    strb w21, [x19, #14]
+    ldrb w20, [x19, #15]
+    ldrb w21, [x19, #11]
+    strb w21, [x19, #15]
+    ldrb w21, [x19, #7]
+    strb w21, [x19, #11]
+    ldrb w21, [x19, #3]
+    strb w21, [x19, #7]
+    strb w20, [x19, #3]
     ldr x19, [sp, #16]
     ldr x20, [sp, #24]
     ldr x21, [sp, #32]
@@ -381,15 +335,17 @@ mixColumns:
     str x26, [sp, #72]
     ldr x19, =matState
     mov x20, #0
-mixcol_row_loop:
+mixcol_col_loop:
     cmp x20, #4
     b.ge mixcol_done
-    ldrb w22, [x19, x20]
-    add x0, x20, #4
+    mov x21, #4
+    mul x21, x20, x21
+    ldrb w22, [x19, x21]
+    add x0, x21, #1
     ldrb w23, [x19, x0]
-    add x0, x20, #8
+    add x0, x21, #2
     ldrb w24, [x19, x0]
-    add x0, x20, #12
+    add x0, x21, #3
     ldrb w25, [x19, x0]
     mov w0, w22
     bl galois_mul2
@@ -429,19 +385,19 @@ mixcol_row_loop:
     eor w26, w26, w0
     str w26, [sp, #12]
     ldr w26, [sp, #0]
-    strb w26, [x19, x20]
-    add x0, x20, #4
+    strb w26, [x19, x21]
+    add x0, x21, #1
     ldr w26, [sp, #4]
     strb w26, [x19, x0]
-    add x0, x20, #8
+    add x0, x21, #2
     ldr w26, [sp, #8]
     strb w26, [x19, x0]
-    add x0, x20, #12
+    add x0, x21, #3
     ldr w26, [sp, #12]
     strb w26, [x19, x0]
     add sp, sp, #16
     add x20, x20, #1
-    b mixcol_row_loop
+    b mixcol_col_loop
 mixcol_done:
     ldr x19, [sp, #16]
     ldr x20, [sp, #24]
@@ -730,13 +686,8 @@ addRoundKeyWithRound:
 addround_loop:
     cmp x0, #16
     b.ge addround_done
-    mov x1, #4
-    udiv x2, x0, x1
-    msub x3, x2, x1, x0
-    mul x4, x3, x1
-    add x4, x4, x2
     ldrb w1, [x19, x0]
-    ldrb w2, [x20, x4]
+    ldrb w2, [x20, x0]
     eor w3, w1, w2
     strb w3, [x19, x0]
     add x0, x0, #1
@@ -750,21 +701,16 @@ addround_done:
 
 .type printRoundHeader, %function
 printRoundHeader:
-    stp x29, x30, [sp, #-32]!
+    stp x29, x30, [sp, #-16]!
     mov x29, sp
-    str x19, [sp, #16]  // Guardar x19
-    mov w19, w0  // Guardar el número de ronda
-    
     print 1, msg_round, lenMsgRound
     sub sp, sp, #16
-    
-    cmp w19, #10
+    cmp w0, #10
     b.lt round_single_digit
     mov w1, #'1'
     strb w1, [sp, #0]
-    sub w19, w19, #10
-    add w19, w19, #'0'
-    strb w19, [sp, #1]
+    mov w1, #'0'
+    strb w1, [sp, #1]
     mov x0, #1
     mov x1, sp
     mov x2, #2
@@ -772,8 +718,8 @@ printRoundHeader:
     svc #0
     b round_print_end
 round_single_digit:
-    add w19, w19, #'0'
-    strb w19, [sp]
+    add w0, w0, #'0'
+    strb w0, [sp]
     mov x0, #1
     mov x1, sp
     mov x2, #1
@@ -782,90 +728,23 @@ round_single_digit:
 round_print_end:
     add sp, sp, #16
     print 1, msg_round_end, lenMsgRoundEnd
-    ldr x19, [sp, #16]  // Restaurar x19
-    ldp x29, x30, [sp], #32
+    ldp x29, x30, [sp], #16
     ret
     .size printRoundHeader, (. - printRoundHeader)
-
-.type saveFinalCipher, %function
-.global saveFinalCipher
-saveFinalCipher:
-    stp x29, x30, [sp, #-32]!
-    mov x29, sp
-    str x19, [sp, #16]
-    str x20, [sp, #24]
-    ldr x19, =matState
-    ldr x20, =criptograma
-    mov x0, #0
-save_cipher_loop:
-    cmp x0, #16
-    b.ge save_cipher_done
-    ldrb w1, [x19, x0]
-    strb w1, [x20, x0]
-    add x0, x0, #1
-    b save_cipher_loop
-save_cipher_done:
-    ldr x19, [sp, #16]
-    ldr x20, [sp, #24]
-    ldp x29, x30, [sp], #32
-    ret
-    .size saveFinalCipher, (. - saveFinalCipher)
-
-.type printFinalCipher, %function
-.global printFinalCipher
-printFinalCipher:
-    stp x29, x30, [sp, #-32]!
-    mov x29, sp
-    str x19, [sp, #16]
-    str x20, [sp, #24]
-    
-    print 1, msg_final_cipher, lenMsgFinalCipher
-    print 1, msg_cipher_hex, lenMsgCipherHex
-    
-    ldr x19, =criptograma
-    mov x20, #0
-print_cipher_loop:
-    cmp x20, #16
-    b.ge print_cipher_newline
-    ldrb w0, [x19, x20]
-    bl print_hex_byte
-    add x20, x20, #1
-    b print_cipher_loop
-print_cipher_newline:
-    print 1, newline, 1
-    print 1, newline, 1
-    
-    ldr x19, [sp, #16]
-    ldr x20, [sp, #24]
-    ldp x29, x30, [sp], #32
-    ret
-    .size printFinalCipher, (. - printFinalCipher)
 
 .type AESRounds, %function
 .global AESRounds
 AESRounds:
-    stp x29, x30, [sp, #-32]!
+    stp x29, x30, [sp, #-16]!
     mov x29, sp
-    str x19, [sp, #16]
-    str x20, [sp, #24]
-
-    // Ronda 0: AddRoundKey inicial
     mov w0, #0
     bl addRoundKeyWithRound
-
-    mov w19, #1  // Contador de ronda (inicia en 1)
-
+    mov w21, #1
 round_loop:
-    cmp w19, #10
-    b.gt rounds_done  // Si w19 > 10, terminar
-
-    // Imprimir cabecera de ronda (preservar w19)
-    mov w20, w19  // Guardar w19 en w20
-    mov w0, w20
+    cmp w21, #10
+    b.gt rounds_done
+    mov w0, w21
     bl printRoundHeader
-    mov w19, w20  // Restaurar w19
-
-    // SubBytes
     print 1, msg_before_subbytes, lenMsgBeforeSub
     ldr x0, =matState
     ldr x1, =debug_state
@@ -877,8 +756,6 @@ round_loop:
     ldr x1, =debug_state
     mov x2, lenDebugState
     bl printMatrix
-
-    // ShiftRows
     print 1, msg_before_shiftrows, lenMsgBeforeShift
     ldr x0, =matState
     ldr x1, =debug_state
@@ -890,10 +767,8 @@ round_loop:
     ldr x1, =debug_state
     mov x2, lenDebugState
     bl printMatrix
-
-    // MixColumns (solo hasta ronda 9)
-    cmp w19, #10
-    b.eq skip_mixcolumns
+    cmp w21, #10
+    beq skip_mixcolumns
     print 1, msg_before_mixcolumns, lenMsgBeforeMix
     ldr x0, =matState
     ldr x1, =debug_state
@@ -905,31 +780,23 @@ round_loop:
     ldr x1, =debug_state
     mov x2, lenDebugState
     bl printMatrix
-
 skip_mixcolumns:
-    // AddRoundKey
     print 1, msg_before_addroundkey, lenMsgBeforeAdd
     ldr x0, =matState
     ldr x1, =debug_state
     mov x2, lenDebugState
     bl printMatrix
-
-    mov w0, w19
+    mov w0, w21
     bl addRoundKeyWithRound
-
     print 1, msg_after_addroundkey, lenMsgAfterAdd
     ldr x0, =matState
     ldr x1, =debug_state
     mov x2, lenDebugState
     bl printMatrix
-
-    add w19, w19, #1  // INCREMENTAR el contador
+    add w21, w21, #1
     b round_loop
-
 rounds_done:
-    ldr x19, [sp, #16]
-    ldr x20, [sp, #24]
-    ldp x29, x30, [sp], #32
+    ldp x29, x30, [sp], #16
     ret
     .size AESRounds, (. - AESRounds)
 
@@ -943,23 +810,21 @@ _start:
     ldr x1, =debug_state
     mov x2, lenDebugState
     bl printMatrix
-    
     print 1, msg_key, lenMsgKey
-    bl convertHexKey
+    bl readKeyInput
     print 1, debug_key, lenDebugKey
     ldr x0, =key
     ldr x1, =debug_key
     mov x2, lenDebugKey
     bl printMatrix
-    
     bl keyExpansion
     bl printExpandedKeys
     bl AESRounds
-    
-    // Guardar y mostrar resultado final
-    bl saveFinalCipher
-    bl printFinalCipher
-    
+    print 1, msg_final, lenMsgFinal
+    ldr x0, =matState
+    ldr x1, =msg_final
+    mov x2, lenMsgFinal
+    bl printMatrix
     mov x0, #0
     mov x8, #93
     svc #0
